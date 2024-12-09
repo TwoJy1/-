@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>골드 분배기</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        table, th, td { border: 1px solid #ccc; }
+        th, td { padding: 8px; text-align: center; }
+        th { background-color: #f4f4f4; cursor: pointer; }
+        .input-section { margin-bottom: 20px; }
+        .checkbox { text-align: center; }
+        .popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            display: none;
+        }
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>골드 분배기</h1>
+
+    <div class="input-section">
+        <label>이름 추가: <input type="text" id="nameInput"></label>
+        <button onclick="addPerson()">추가</button>
+        <button onclick="deleteSelected()">삭제</button>
+        <button onclick="saveData()">저장</button>
+        <button onclick="resetData()">초기화</button>
+        <br><br>
+        <label>분배 날짜: <input type="date" id="dateInput"></label>
+        <label>분배 골드: <input type="number" id="goldInput"></label>
+        <button onclick="distributeGold()">분배</button>
+        <br><br>
+        <button onclick="deleteDistribution()">분배 이력 삭제</button>
+        <br><br>
+        <button onclick="exportToFile()">JSON 파일로 내보내기</button>
+        <button onclick="exportToText()">메모장 파일로 내보내기</button>
+        <input type="file" id="fileInput" accept=".json" onchange="importFromFile()">
+    </div>
+
+    <table id="goldTable">
+        <thead>
+            <tr>
+                <th>선택</th>
+                <th>이름</th>
+                <th onclick="sortByGold()">누적 골드 (수정 가능)</th>
+                <th>남은 골드</th>
+                <th>분배할 골드</th>
+                <th>분배 기록</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <div class="popup-overlay" onclick="closePopup()"></div>
+    <div class="popup" id="popup">
+        <h3>분배 기록</h3>
+        <div id="popupContent"></div>
+        <button onclick="closePopup()">닫기</button>
+    </div>
+
+    <script>
+        let goldData = JSON.parse(localStorage.getItem('goldData')) || [];
+        let sortAscending = true; // 정렬 상태 저장
+
+        function renderTable() {
+            const tableBody = document.querySelector('#goldTable tbody');
+            tableBody.innerHTML = '';
+            goldData.forEach((person, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="checkbox"><input type="checkbox" data-index="${index}"></td>
+                    <td>${person.name}</td>
+                    <td>
+                        <input type="number" value="${person.totalGold}" 
+                               onchange="updateTotalGold(${index}, this.value)">
+                    </td>
+                    <td>${calculateRemainingGold(person)}</td>
+                    <td>${calculateDistributableGold(person)}</td>
+                    <td>
+                        <button onclick="showDetails(${index})">상세보기</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        function addPerson() {
+            const nameInput = document.getElementById('nameInput').value.trim();
+            if (!nameInput) {
+                alert('이름을 입력하세요!');
+                return;
+            }
+            goldData.push({
+                name: nameInput,
+                totalGold: 0,
+                distributions: []
+            });
+            document.getElementById('nameInput').value = '';
+            renderTable();
+        }
+
+        function deleteSelected() {
+            const checkboxes = document.querySelectorAll('#goldTable tbody input[type="checkbox"]:checked');
+            if (checkboxes.length === 0) {
+                alert('삭제할 대상을 선택하세요!');
+                return;
+            }
+            const indexesToDelete = Array.from(checkboxes).map(cb => parseInt(cb.dataset.index));
+            indexesToDelete.sort((a, b) => b - a).forEach(index => goldData.splice(index, 1));
+            renderTable();
+        }
+
+        function updateTotalGold(index, newGold) {
+            goldData[index].totalGold = parseFloat(newGold) || 0;
+            renderTable();
+        }
+
+        function distributeGold() {
+            const date = document.getElementById('dateInput').value;
+            const goldInput = parseFloat(document.getElementById('goldInput').value);
+            if (!date || isNaN(goldInput) || goldInput <= 0) {
+                alert('날짜와 분배 골드를 올바르게 입력하세요!');
+                return;
+            }
+            const checkboxes = document.querySelectorAll('#goldTable tbody input[type="checkbox"]:checked');
+            if (checkboxes.length === 0) {
+                alert('분배할 대상을 선택하세요!');
+                return;
+            }
+            const selectedIndexes = Array.from(checkboxes).map(cb => parseInt(cb.dataset.index));
+            selectedIndexes.forEach(index => {
+                goldData[index].distributions.push({ date, amount: Math.floor(goldInput) });
+            });
+            renderTable();
+        }
+
+        function calculateRemainingGold(person) {
+            const distributedGold = person.distributions.reduce((sum, dist) => sum + dist.amount, 0);
+            return person.totalGold - distributedGold;
+        }
+
+        function calculateDistributableGold(person) {
+            const remainingGold = calculateRemainingGold(person);
+            return remainingGold >= 1000 ? Math.floor(remainingGold / 1000) * 1000 : 0;
+        }
+
+        function showDetails(index) {
+            const person = goldData[index];
+            const popupContent = document.getElementById('popupContent');
+            popupContent.innerHTML = person.distributions.map((dist, distIndex) => `
+                <p>${dist.date}: ${Math.floor(dist.amount)} 골드 
+                <button onclick="deleteSingleDistribution(${index}, ${distIndex})">삭제</button></p>
+            `).join('') || '<p>기록 없음</p>';
+            document.querySelector('.popup-overlay').style.display = 'block';
+            document.getElementById('popup').style.display = 'block';
+        }
+
+        function closePopup() {
+            document.querySelector('.popup-overlay').style.display = 'none';
+            document.getElementById('popup').style.display = 'none';
+        }
+
+        function deleteSingleDistribution(personIndex, distIndex) {
+            goldData[personIndex].distributions.splice(distIndex, 1);
+            renderTable();
+            showDetails(personIndex);
+        }
+
+        function saveData() {
+            localStorage.setItem('goldData', JSON.stringify(goldData));
+            alert('데이터가 저장되었습니다!');
+        }
+
+        function resetData() {
+            if (confirm('모든 데이터를 초기화하시겠습니까?')) {
+                goldData = [];
+                localStorage.removeItem('goldData');
+                renderTable();
+            }
+        }
+
+        function exportToFile() {
+            const json = JSON.stringify(goldData, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'gold_data.json';
+            link.click();
+        }
+
+        function exportToText() {
+            const textData = goldData.map(person => {
+                return `이름: ${person.name}\n누적 골드: ${person.totalGold}\n남은 골드: ${calculateRemainingGold(person)}\n분배 기록:\n${person.distributions.map(dist => ` - ${dist.date}: ${Math.floor(dist.amount)} 골드`).join('\n')}`;
+            }).join('\n\n');
+            const blob = new Blob([textData], { type: 'text/plain' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'gold_data.txt';
+            link.click();
+        }
+
+        function importFromFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    try {
+                        const parsedData = JSON.parse(e.target.result);
+                        if (Array.isArray(parsedData) && parsedData.every(isValidGoldData)) {
+                            goldData = parsedData;
+                            renderTable();
+                            alert('데이터가 성공적으로 불러와졌습니다!');
+                        } else {
+                            throw new Error('유효하지 않은 데이터 구조입니다.');
+                        }
+                    } catch (err) {
+                        alert('파일 읽기 오류: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function isValidGoldData(person) {
+            return (
+                typeof person.name === 'string' &&
+                typeof person.totalGold === 'number' &&
+                Array.isArray(person.distributions) &&
+                person.distributions.every(dist => 
+                    typeof dist.date === 'string' && 
+                    typeof dist.amount === 'number'
+                )
+            );
+        }
+
+        function sortByGold() {
+            goldData.sort((a, b) => sortAscending ? a.totalGold - b.totalGold : b.totalGold - a.totalGold);
+            sortAscending = !sortAscending;
+            renderTable();
+        }
+
+        window.onload = renderTable;
+    </script>
+</body>
+</html>
